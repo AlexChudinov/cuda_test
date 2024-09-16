@@ -1,5 +1,6 @@
 #include "rgba_to_grey.cuh"
 
+
 __global__
 void rgba_to_grayscale_simple(const uchar4* const d_imageRGBA,
                               unsigned char* const d_imageGray,
@@ -14,14 +15,13 @@ void rgba_to_grayscale_simple(const uchar4* const d_imageRGBA,
     d_imageGray[offset] = 0.299f*pixel.x + 0.587f*pixel.y+0.114f*pixel.z;
 }
 
-void rgba_to_grayscale_simple_wrapper(
-    const uchar4* const d_imageRGBA,
-    unsigned char* const d_imageGray,
-    int numRows, 
-    int numCols,
-    dim3 gridSize,
-    dim3 blockSize
-) {
+void rgba_to_grayscale_simple_wrapper(const uchar4* const d_imageRGBA,
+                                      unsigned char* const d_imageGray,
+                                      size_t numRows,
+                                      size_t numCols,
+                                      const dim3& gridSize,
+                                      const dim3& blockSize)
+{
     rgba_to_grayscale_simple<<<gridSize, blockSize>>>(d_imageRGBA, d_imageGray, numRows, numCols);
 }
 
@@ -44,14 +44,13 @@ void rgba_to_grayscale_optimized(const uchar4* const d_imageRGBA,
     }
 }
 
-void rgba_to_grayscale_optimized_wrapper(
-    const uchar4* const d_imageRGBA,
-    unsigned char* const d_imageGray,
-    int numRows, 
-    int numCols,
-    int elementsPerThread,
-    dim3 gridSize,
-    dim3 blockSize
-) {
+void rgba_to_grayscale_optimized_wrapper(const uchar4* const d_imageRGBA,
+                                         unsigned char* const d_imageGray,
+                                         int numRows,
+                                         int numCols,
+                                         int elementsPerThread,
+                                         dim3 gridSize,
+                                         dim3 blockSize)
+{
     return rgba_to_grayscale_optimized<<<gridSize, blockSize>>>(d_imageRGBA, d_imageGray, numRows, numCols, elementsPerThread);
 }

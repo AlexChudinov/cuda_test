@@ -8,12 +8,9 @@
 #include <filesystem>
 #include <chrono>
 
-#include "utils.h"
+#include "test_config.h"
+#include "utils/utils.h"
 #include "rgba_to_grey.cuh"
-
-#if !defined(DATA_DIR) && !defined(OUTPUT_DIR)
-#error "Data directories were not defined"
-#endif
 
 const std::filesystem::path data_dir = DATA_DIR;
 const std::filesystem::path output_dir=OUTPUT_DIR;
@@ -56,72 +53,72 @@ void RGBtoGrayscaleOpenMP(uchar4 *imageArray, unsigned char *imageGrayArray, int
     }
 }
 
-void RGBtoGrayscaleCUDA(const uchar4 * const h_imageRGBA, unsigned char* const h_imageGray, size_t numRows, size_t numCols)
+void RGBtoGrayscaleCUDA(
+    const std::vector<uchar4>& h_imageRGBA,
+    std::vector<unsigned char>& h_imageGray,
+    size_t numRows,
+    size_t numCols
+)
 {
-    uchar4 *d_imageRGBA;
-    unsigned char *d_imageGray;
-    const size_t numPixels = numRows * numCols;
     cudaSetDevice(0);
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaMalloc(&d_imageRGBA, sizeof(uchar4) * numPixels));
-    checkCudaErrors(cudaMalloc(&d_imageGray, sizeof(unsigned char) * numPixels));
-    checkCudaErrors(cudaMemcpy(d_imageRGBA, h_imageRGBA, sizeof(uchar4) * numPixels, cudaMemcpyHostToDevice));
 
-    dim3 blockSize;
-    dim3 gridSize;
-    int threadNum;
+    int threadNum = 1024;
+    dim3 blockSize(threadNum, 1, 1);
+    dim3 gridSize(numCols/threadNum + 1, numRows, 1);
 
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+    auto runner = cuda_benchmark_matrix_map<uchar4, unsigned char>(
+        rgba_to_grayscale_simple_wrapper,
+        h_imageRGBA,
+        h_imageGray,
+        numRows,
+        numCols
+    );
 
-    threadNum = 1024;
-    blockSize = dim3(threadNum, 1, 1);
-    gridSize = dim3(numCols/threadNum+1, numRows, 1);
-    cudaEventRecord(start);
-    rgba_to_grayscale_simple_wrapper(d_imageRGBA, d_imageGray, numRows, numCols, gridSize, blockSize);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    cudaDeviceSynchronize();
-    checkCudaErrors(cudaGetLastError());
-    float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "CUDA time simple (ms): " << milliseconds << std::endl;
-    checkCudaErrors(cudaMemcpy(h_imageGray, d_imageGray, sizeof(unsigned char) * numPixels, cudaMemcpyDeviceToHost));
-    cudaFree(d_imageGray);
-    cudaFree(d_imageRGBA);
+    runner(
+        gridSize,
+        blockSize
+    );
 }
 
-void RGBtoGrayscaleCUDAOpt(const uchar4 * const h_imageRGBA, unsigned char* const h_imageGray, size_t numRows, size_t numCols) {
-    uchar4 *d_imageRGBA;
-    unsigned char *d_imageGray;
+void RGBtoGrayscaleCUDAOpt(
+    const std::vector<uchar4>& h_imageRGBA,
+    std::vector<unsigned char>& h_imageGray,
+    size_t numRows,
+    size_t numCols
+)
+{
     const size_t numPixels = numRows * numCols;
     cudaSetDevice(0);
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaMalloc(&d_imageRGBA, sizeof(uchar4) * numPixels));
-    checkCudaErrors(cudaMalloc(&d_imageGray, sizeof(unsigned char) * numPixels));
-    checkCudaErrors(cudaMemcpy(d_imageRGBA, h_imageRGBA, sizeof(uchar4) * numPixels, cudaMemcpyHostToDevice));
+    auto d_imageRGBA = make_cuda_ptr<uchar4>(h_imageRGBA);
+    auto d_imageGray = make_cuda_ptr<unsigned char>(h_imageRGBA.size());
 
     int threadNum=128;
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-
     const int elemsPerThread = 16;
     dim3 blockSize(threadNum, 1, 1);
     dim3 gridSize(numCols / (threadNum*elemsPerThread) + 1, numRows, 1);
-    cudaEventRecord(start);
-    rgba_to_grayscale_optimized_wrapper(d_imageRGBA, d_imageGray, numRows, numCols, elemsPerThread, gridSize, blockSize);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-    float milliseconds = 0.;
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "CUDA time optimized (ms): " << milliseconds << std::endl;
-    checkCudaErrors(cudaMemcpy(h_imageGray, d_imageGray, sizeof(unsigned char) * numPixels, cudaMemcpyDeviceToHost));
-    cudaFree(d_imageGray);
-    cudaFree(d_imageRGBA);
+
+    auto wrapper = [&](
+        const uchar4* d_imageRGBA,
+        unsigned char* d_imageGray,
+        size_t nRows,
+        size_t nCols,
+        const dim3& gridSize,
+        const dim3& blockSize
+    ) {
+        rgba_to_grayscale_optimized_wrapper(d_imageRGBA, d_imageGray, nRows, nCols, elemsPerThread, gridSize, blockSize);
+    };
+
+    auto runner = cuda_benchmark_matrix_map<uchar4, unsigned char>(
+        wrapper,
+        h_imageRGBA,
+        h_imageGray,
+        numRows,
+        numCols
+    );
+
+    runner(gridSize, blockSize);
 }
 
 TEST(openmp_vs_gpu, rgb_to_grey_cpu) {
@@ -140,31 +137,39 @@ TEST(openmp_vs_gpu, rgb_to_grey_cpu) {
 }
 
 TEST(openmp_vs_gpu, rgb_to_grey_gpu) {
-    cv::Mat image;
-    cv::Mat imageGray;
-    uchar4 *imageArray;
-    unsigned char *imageGrayArray;
-    prepareImagePointers(data_dir / "images/zimorodoc.jpg", image, &imageArray, imageGray, &imageGrayArray, CV_8UC1);
+    cv::Mat image = cv::imread(data_dir / "images/zimorodoc.jpg");
+    cv::Mat imageBGRA;
+    cv::cvtColor(image, imageBGRA, cv::COLOR_BGR2BGRA);
+    std::vector<uchar4> imageArray(imageBGRA.ptr<uchar4>(), imageBGRA.ptr<uchar4>() + imageBGRA.total());
+    std::vector<unsigned char> imageGrayArray(imageBGRA.total());
 
     auto start = ch::system_clock::now();
     RGBtoGrayscaleCUDA(imageArray, imageGrayArray, image.rows, image.cols);
     auto duration = ch::duration_cast<ch::milliseconds>(ch::system_clock::now() - start);
     std::cout << "CUDA: " << duration.count() << " мс" << std::endl;
 
-    cv::imwrite(output_dir / "zimorodoc-cuda.jpg", imageGray);
+    cv::Mat imageOut;
+    imageOut.create(image.rows, image.cols, CV_8UC1);
+    std::copy(imageGrayArray.begin(), imageGrayArray.end(), imageOut.ptr<unsigned char>());
+    cv::imwrite(output_dir / "zimorodoc-cuda.jpg", imageOut);
 }
 
 TEST(openmp_vs_gpu, rgb_to_grey_gpu_opt) {
-    cv::Mat image;
-    cv::Mat imageGray;
-    uchar4 *imageArray;
-    unsigned char *imageGrayArray;
-    prepareImagePointers(data_dir / "images/zimorodoc.jpg", image, &imageArray, imageGray, &imageGrayArray, CV_8UC1);
+    cv::Mat image = cv::imread(data_dir / "images/zimorodoc.jpg");
+    cv::Mat imageBGRA;
+    cv::cvtColor(image, imageBGRA, cv::COLOR_BGR2BGRA);
+    std::vector<uchar4> imageArray(imageBGRA.ptr<uchar4>(), imageBGRA.ptr<uchar4>() + imageBGRA.total());
+    std::vector<unsigned char> imageGrayArray(imageBGRA.total());
+
 
     auto start = ch::system_clock::now();
     RGBtoGrayscaleCUDAOpt(imageArray, imageGrayArray, image.rows, image.cols);
     auto duration = ch::duration_cast<ch::milliseconds>(ch::system_clock::now() - start);
     std::cout << "CUDA: " << duration.count() << " мс" << std::endl;
 
-    cv::imwrite(output_dir / "zimorodoc-cuda-opt.jpg", imageGray);
+
+    cv::Mat imageOut;
+    imageOut.create(image.rows, image.cols, CV_8UC1);
+    std::copy(imageGrayArray.begin(), imageGrayArray.end(), imageOut.ptr<unsigned char>());
+    cv::imwrite(output_dir / "zimorodoc-cuda-opt.jpg", imageOut);
 }

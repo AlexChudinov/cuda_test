@@ -50,8 +50,8 @@ void cuda_get_data(const cuda_ptr<T>& d_ptr, T* h_ptr, size_t num_elements) {
         cudaMemcpy(h_ptr, *d_ptr, num_elements * sizeof(T), cudaMemcpyDeviceToHost));
 }
 
-template <typename T>
-void cuda_fill_ptr(const std::vector<T> h_data, cuda_ptr<T>& d_ptr) {
+template <typename T, class Container>
+void cuda_fill_ptr(const Container& h_data, cuda_ptr<T>& d_ptr) {
     cuda_fill_ptr(h_data.data(), d_ptr, h_data.size());
 }
 
@@ -60,8 +60,8 @@ void cuda_get_data(const cuda_ptr<T>& d_ptr, std::vector<T>& h_data) {
     cuda_get_data(d_ptr, h_data.data(), h_data.size());
 }
 
-template <typename T>
-cuda_ptr<T> make_cuda_ptr(const std::vector<T>& h_data) {
+template <typename T, class Container>
+cuda_ptr<T> make_cuda_ptr(const Container& h_data) {
     cuda_ptr<T> d_ptr = make_cuda_ptr<T>(h_data.size());
     cuda_fill_ptr(h_data, d_ptr);
     return d_ptr;

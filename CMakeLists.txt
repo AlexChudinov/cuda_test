@@ -6,7 +6,7 @@ find_package(OpenCV 4.0 REQUIRED)
 find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
 
 file(GLOB CXX_SRCS *.cpp)
-file(GLOB CUDA_SRCS *.cu)
+file(GLOB CUDA_SRCS *.cu cuda_src/*.cu)
 
 set(CMAKE_CUDA_STANDARD 11)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
